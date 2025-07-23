@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8" />
+    <title>JSON 转 Go sjson 代码生成器</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding-left: 20px;
+            background-color: #f9fafb;
+            color: #333;
+
+        }
+
+        textarea {
+            width: 100%;
+            height: 200px;
+            font-family: monospace;
+        }
+
+        pre {
+            background: #f0f0f0;
+            padding: 10px;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+
+        button {
+            padding: 8px 16px;
+            margin-top: 10px;
+            margin-right: 10px;
+            cursor: pointer;
+        }
+
+        .error {
+            color: red;
+        }
+
+        label {
+            user-select: none;
+        }
+
+        /* 新增通知样式 */
+        #notify {
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 10px 20px;
+            background-color: #4caf50;
+            color: white;
+            border-radius: 4px;
+            font-weight: bold;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+            z-index: 1000;
+        }
+
+        #notify.error {
+            background-color: #f44336;
+        }
+
+
+
+        h2 {
+            font-size: 2.4rem;
+            font-weight: 700;
+            color: #222;
+            margin-bottom: 0.2em;
+            border-bottom: 3px solid #4caf50;
+            display: inline-block;
+        }
+
+        h3 {
+            font-size: 1.2rem;
+            font-weight: 400;
+            color: #666;
+            margin-top: 0;
+            font-style: italic;
+            letter-spacing: 0.05em;
+        }
+
+        .note {
+            border: 1px solid #ccc;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border-radius: 5px;
+        }
+    </style>
+
+</head>
+
+<body>
+
+    <h2>JSON 字符串转 Go 语言 sjson 代码生成器</h2>
+    <h3>JSON String to Go sjson Code Generator</h3>
+
+    <div id="notify"></div> <!-- 通知区域 -->
+
+    <label for="jsonInput">请输入 JSON 字符串:</label><br />
+    <textarea id="jsonInput" placeholder='例如: {"name":{"first":"Tom","last":"Anderson"},"age":37}'></textarea>
+    <br />
+
+    <label>
+        <input type="checkbox" id="skipErrCheck" checked />
+        确保 JSON 无误，跳过错误处理（err 改为 _，无错误返回）<br />
+        &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Ensure JSON is correct, skip error handling (change err to _, no error return)
+    </label>
+
+    <br />
+
+    <button onclick="generateGoCode()">生成 Go 代码 (generate)</button>
+    <button onclick="copyCode()">复制代码 (copy)</button>
+    <button onclick="example()">填充json (example)</button>
+
+    <h4>生成的 Go 语言代码：</h4>
+    <pre id="output"></pre>
+    <p class="error" id="errorMsg"></p>
+    <br />
+    <div class="note">
+    <p>本项目是AI生成，只保证json生成结果，不保证顺序，对转义字符友好，例如数字键等，这是我的第一个项目，如果喜欢可以给个star</p>
+    <p>This project is AI-generated, only guarantees JSON generation results, not the order, friendly to escape characters, e.g., numeric keys, etc. This is my first project, if you like it, please give a star.</p>
+</div>
+
+    <script>
+        function example() {
+            document.getElementById("jsonInput").value = '{"name":{"first":"Tom","last":"Anderson"},"age":37}'
+
+        }
+        function escapeGoString(str) {
+            return '"' + str
+                .replace(/\\/g, '\\\\')   // 先转义反斜杠
+                .replace(/"/g, '\\"')     // 转义双引号
+                .replace(/\n/g, '\\n')    // 转义换行符
+                .replace(/\r/g, '\\r')    // 转义回车符
+                .replace(/\t/g, '\\t')    // 转义制表符
+                // 如果需要，还可以处理其他特殊字符，比如 \b, \f 等
+                + '"';
+        }
+
+
+        function isObject(val) {
+            return val && typeof val === 'object' && !Array.isArray(val);
+        }
+
+        function isNumericKey(key) {
+            // 判断是否纯数字字符串（不包含小数点、负号）
+            return /^[0-9]+$/.test(key);
+        }
+
+        function generateSjsonSets(data, path = "", skipErrCheck = false) {
+            let lines = [];
+
+            if (Array.isArray(data)) {
+                for (let i = 0; i < data.length; i++) {
+                    const newPath = path ? path + "." + i : "" + i;
+                    if (typeof data[i] === 'object' && data[i] !== null) {
+                        lines = lines.concat(generateSjsonSets(data[i], newPath, skipErrCheck));
+                    } else {
+                        lines.push(generateSetLine(newPath, data[i], skipErrCheck));
+                    }
+                }
+            } else if (isObject(data)) {
+                for (const key of Object.keys(data)) {
+                    // 先转义键中的点
+                    let escapedKey = key.replace(/\./g, '\\\\.');
+
+                    // 数字键前面加冒号
+                    escapedKey = isNumericKey(key) ? ":" + escapedKey : escapedKey;
+
+                    const keyPath = path ? path + "." + escapedKey : escapedKey;
+                    if (typeof data[key] === 'object' && data[key] !== null) {
+                        lines = lines.concat(generateSjsonSets(data[key], keyPath, skipErrCheck));
+                    } else {
+                        lines.push(generateSetLine(keyPath, data[key], skipErrCheck));
+                    }
+                }
+            } else {
+                lines.push(generateSetLine(path, data, skipErrCheck));
+            }
+
+            return lines;
+        }
+
+
+        function generateSetLine(path, value, skipErrCheck) {
+            let valStr;
+            if (typeof value === "string") {
+                valStr = escapeGoString(value);
+            } else if (typeof value === "number") {
+                valStr = value.toString();
+            } else if (typeof value === "boolean") {
+                valStr = value ? "true" : "false";
+            } else if (value === null) {
+                valStr = "nil";
+            } else {
+                valStr = "nil";
+            }
+
+            if (skipErrCheck) {
+                return `jsonStr, _ = sjson.Set(jsonStr, "${path}", ${valStr})`;
+            } else {
+                return `jsonStr, err = sjson.Set(jsonStr, "${path}", ${valStr})
+if err != nil {
+    return "", err
+}`;
+            }
+        }
+
+        function generateGoCode() {
+            const outputEl = document.getElementById("output");
+            const errorEl = document.getElementById("errorMsg");
+            outputEl.textContent = "";
+            errorEl.textContent = "";
+
+            const jsonStr = document.getElementById("jsonInput").value.trim();
+            if (!jsonStr) {
+                errorEl.textContent = "请输入有效的 JSON 字符串。";
+                return;
+            }
+
+            let data;
+            try {
+                data = JSON.parse(jsonStr);
+            } catch (e) {
+                errorEl.textContent = "JSON 解析错误，请检查格式：" + e.message;
+                return;
+            }
+
+            const skipErrCheck = document.getElementById("skipErrCheck").checked;
+
+            let codeLines = [];
+
+            codeLines.push('package main');
+            codeLines.push('');
+            codeLines.push('import (');
+            codeLines.push('    "fmt"');
+            codeLines.push('    "github.com/tidwall/sjson"');
+            codeLines.push(')');
+            codeLines.push('');
+
+            if (skipErrCheck) {
+                codeLines.push('func JsonToSjson() string {');
+                codeLines.push('    var jsonStr string');
+            } else {
+                codeLines.push('func JsonToSjson() (string, error) {');
+                codeLines.push('    var jsonStr string');
+                codeLines.push('    var err error');
+            }
+
+            codeLines.push('');
+
+            const lines = generateSjsonSets(data, "", skipErrCheck);
+            codeLines = codeLines.concat(lines);
+
+            codeLines.push('');
+            if (skipErrCheck) {
+                codeLines.push('    return jsonStr');
+            } else {
+                codeLines.push('    return jsonStr, nil');
+            }
+            codeLines.push('}');
+            codeLines.push('');
+            codeLines.push('func main() {');
+            if (skipErrCheck) {
+                codeLines.push('    jsonStr := JsonToSjson()');
+                codeLines.push('    fmt.Println(jsonStr)');
+            } else {
+                codeLines.push('    jsonStr, err := JsonToSjson()');
+                codeLines.push('    if err != nil {');
+                codeLines.push('        fmt.Println("Error:", err)');
+                codeLines.push('        return');
+                codeLines.push('    }');
+                codeLines.push('    fmt.Println(jsonStr)');
+            }
+            codeLines.push('}');
+
+            outputEl.textContent = codeLines.join('\n');
+        }
+
+        // 显示顶部通知，type='success' 或 'error'
+        function showNotify(message, type = 'success') {
+            const notifyEl = document.getElementById('notify');
+            notifyEl.textContent = message;
+            notifyEl.className = type === 'error' ? 'error' : '';
+            notifyEl.style.opacity = '1';
+            notifyEl.style.pointerEvents = 'auto';
+
+            // 3秒后自动隐藏
+            clearTimeout(notifyEl.hideTimeout);
+            notifyEl.hideTimeout = setTimeout(() => {
+                notifyEl.style.opacity = '0';
+                notifyEl.style.pointerEvents = 'none';
+            }, 3000);
+        }
+
+        function copyCode() {
+            const outputEl = document.getElementById("output");
+            const code = outputEl.textContent;
+            if (!code) {
+                showNotify('请先生成代码', 'error');
+                return;
+            }
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(code).then(() => {
+                    showNotify('代码已复制到剪贴板');
+                }, () => {
+                    fallbackCopy(code);
+                });
+            } else {
+                fallbackCopy(code);
+            }
+        }
+
+        function fallbackCopy(text) {
+            const tmpTextarea = document.createElement('textarea');
+            tmpTextarea.value = text;
+            document.body.appendChild(tmpTextarea);
+            tmpTextarea.select();
+            try {
+                const successful = document.execCommand('copy');
+                if (successful) {
+                    showNotify('代码已复制到剪贴板');
+                } else {
+                    showNotify('复制失败，请手动复制', 'error');
+                }
+            } catch (err) {
+                showNotify('复制失败，请手动复制', 'error');
+            }
+            document.body.removeChild(tmpTextarea);
+        }
+    </script>
+
+</body>
+
+</html>
